@@ -4,6 +4,9 @@ This plugin makes the episode select menu similar to the console version of the 
 # Compatibility
 Compatible only with GTA IV The Complete Edition.
 
+# Building
+Requires [SandeMC/plugin-sdk](https://github.com/SandeMC/plugin-sdk) master (pattern null-safety and DrawMouseCursor fixes) at `PLUGIN_SDK_DIR`.
+
 # Screenshot
 <p align="center">
 <img src="https://i.imgur.com/9JHaZTU.png" width="640" height="360">

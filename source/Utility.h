@@ -20,6 +20,8 @@ static float GetAspectRatio() {
     float as = CDraw::ms_fAspectRatio;
 #elif GTAIV
     float as = TheViewport.FindAspectRatio(false);
+    if (as <= 0.0f)
+        as = DEFAULT_SCREEN_ASPECT_RATIO;
 #endif
     return as;
 }

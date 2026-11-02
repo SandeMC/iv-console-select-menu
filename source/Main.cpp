@@ -16,6 +16,9 @@
 
 #include "Utility.h"
 
+#include <cstdio>
+#include <cstring>
+
 using namespace plugin;
 
 class ConsoleSelectMenuIV {
@@ -31,6 +34,11 @@ public:
 
     static inline bool bSkipTitleMenu = false;
     static inline bool bUseCELogo = true;
+    static inline bool bEnabled = false;
+    static inline bool bShuttingDown = false;
+    static inline bool bTitleMenuPatched = false;
+    static inline uintptr_t titleMenuAddress = 0;
+    static inline uint8_t titleMenuBytes[5] = {};
 
     static void DrawCharacter(CSprite2d* sprite, int32_t i, bool selected) {
         float hw = 205.0f;
@@ -59,7 +67,7 @@ public:
         sprite->Draw(rect, rage::Color32(255, 255, 255, selected ? 255 : 90));
 
         rect.left += ScaleX(64.0f);
-        rect.right -= ScaleY(64.0f);
+        rect.right -= ScaleX(64.0f);
         rect.bottom -= ScaleY(64.0f);
         if (CheckHover(rect) && drawMouse) {
             prevEpisode = selectedEpisode;
@@ -73,11 +81,13 @@ public:
     }
 
     static const bool GetAxisLeft() {
-        return CPad::GetPad(0)->NewState.LeftStickX < 0 && CPad::GetPad(0)->OldState.LeftStickX >= 0;
+        CPad* pad = CPad::GetPad(0);
+        return pad && pad->NewState.LeftStickX < 0 && pad->OldState.LeftStickX >= 0;
     }
 
     static const bool GetAxisRight() {
-        return CPad::GetPad(0)->NewState.LeftStickX > 0 && CPad::GetPad(0)->OldState.LeftStickX <= 0;
+        CPad* pad = CPad::GetPad(0);
+        return pad && pad->NewState.LeftStickX > 0 && pad->OldState.LeftStickX <= 0;
     }
 
     static bool GetLeft() {
@@ -123,7 +133,7 @@ public:
         }
 
         static char buf[2];
-        sprintf(buf, "%d", ep);
+        snprintf(buf, sizeof(buf), "%d", ep);
         CMenuManager::m_EpisodeStr = buf;
     }
 
@@ -140,38 +150,100 @@ public:
         bUseCELogo = config["bUseCELogo"].asBool(true);
     }
 
+    static bool LoadTextures() {
+        const int32_t slot = CTxdStore::AddTxdSlot("console_select_menu");
+        if (slot < 0) {
+            return false;
+        }
+
+        if (!CTxdStore::LoadTxd(slot, "platform:/textures/console_select_menu")) {
+            CTxdStore::RemoveTxdSlot(slot);
+            return false;
+        }
+
+        CTxdStore::AddRef(slot);
+        CTxdStore::PushCurrentTxd();
+        CTxdStore::SetCurrentTxd(slot);
+
+        gtaiv.SetTexture("iv");
+        gtatlad.SetTexture("tlad");
+        gtatbogt.SetTexture("tbogt");
+        gta.SetTexture("gta");
+
+        CTxdStore::PopCurrentTxd();
+
+        const bool ready = gtaiv.m_pTexture && gtatlad.m_pTexture && gtatbogt.m_pTexture;
+        if (!ready) {
+            CTxdStore::RemoveTxdSlot(slot);
+        }
+
+        return ready;
+    }
+
+    static uintptr_t TitleMenuAddress() {
+        return plugin::pattern::Get("68 8A 00 8B F8 EB 02 33 FF 8B CF E8 ? ? ? ?", -0x30);
+    }
+
+    static uintptr_t LoadingScreenCallAddress() {
+        return plugin::pattern::Get("E8 ? ? ? ? F3 0F 10 4C 24 ? F3 0F 10 5C 24 ? 83 C4 08");
+    }
+
+    static void PatchTitleMenu() {
+        titleMenuAddress = TitleMenuAddress();
+        if (!titleMenuAddress) {
+            return;
+        }
+
+        if (plugin::patch::GetUInt(titleMenuAddress) != 0x002CA164
+            || plugin::patch::GetUShort(titleMenuAddress + 6) != 0xEC83) {
+            return;
+        }
+
+        plugin::patch::GetRaw(titleMenuAddress, titleMenuBytes, sizeof(titleMenuBytes));
+        plugin::patch::RedirectJump(titleMenuAddress, Dummy);
+        bTitleMenuPatched = true;
+    }
+
+    static void RestoreTitleMenu() {
+        if (!bTitleMenuPatched) {
+            return;
+        }
+
+        plugin::patch::SetRaw(titleMenuAddress, titleMenuBytes, sizeof(titleMenuBytes));
+        bTitleMenuPatched = false;
+    }
+
+    static void Initialise() {
+        ReadSettings();
+
+        if (!bTitleMenuPatched || !LoadTextures()) {
+            RestoreTitleMenu();
+            return;
+        }
+
+        bEnabled = true;
+    }
+
+    static void Shutdown() {
+        bShuttingDown = true;
+        bEnabled = false;
+    }
+
     ConsoleSelectMenuIV() {
+        PatchTitleMenu();
+
         plugin::Events::initEngineEvent += []() {
-            int32_t slot = CTxdStore::AddTxdSlot("console_select_menu");
-            CTxdStore::LoadTxd(slot, "platform:/textures/console_select_menu");
-            CTxdStore::AddRef(slot);
-            CTxdStore::PushCurrentTxd();
-            CTxdStore::SetCurrentTxd(slot);
-
-            gtaiv.SetTexture("iv");
-            gtatlad.SetTexture("tlad");
-            gtatbogt.SetTexture("tbogt");
-            gta.SetTexture("gta");
-
-            CTxdStore::PopCurrentTxd();
-
-            ReadSettings();
+            Initialise();
         };
 
         plugin::Events::shutdownEngineEvent += []() {
-            gtaiv.Delete();
-            gtatlad.Delete();
-            gtatbogt.Delete();
-            gta.Delete();
-
-            int32_t slot = CTxdStore::FindTxdSlot("console_select_menu");
-            CTxdStore::RemoveTxdSlot(slot);
+            Shutdown();
         };
 
-        static auto a = plugin::pattern::Get("64 A1 ? ? ? ? 83 EC 1C 8B 00 56 8B 48 08", 0);
-        plugin::patch::RedirectJump(a, Dummy);
-
         plugin::Events::menuProcessEvent += []() {
+            if (!bEnabled || bShuttingDown)
+                return;
+
             if (CMenuManager::m_DefaultFrontend || CMenuManager::m_Refresh)
                 return;
 
@@ -237,6 +309,9 @@ public:
         };
 
         plugin::Events::drawMenuEvent.before += []() {
+            if (!bEnabled || bShuttingDown)
+                return;
+
             if (CMenuManager::m_DefaultFrontend || CMenuManager::m_Refresh)
                 return;
 
@@ -262,11 +337,16 @@ public:
         };
 
         // Use CE logo on intro :P
-        static CdeclEvent <AddressList<0x5CC56D, H_CALL>, PRIORITY_AFTER, ArgPick2N<rage::grcTexturePC*, 0, uint8_t, 1>, void(rage::grcTexturePC*, uint8_t)> onSetLoadingScreenTex({ "E8 ? ? ? ? F3 0F 10 4C 24 ? F3 0F 10 5C 24 ? 83 C4 08" });
-        onSetLoadingScreenTex += [](rage::grcTexturePC* tex, uint8_t) {
-            if (bUseCELogo && !strcmp(tex->m_Name, "pack:/gta.dds")) {
-                gta.SetRenderState();
-            }
-        };
+        static CdeclEvent <AddressList<0, H_CALL>, PRIORITY_AFTER, ArgPick2N<rage::grcTexturePC*, 0, uint8_t, 1>, void(rage::grcTexturePC*, uint8_t)> onSetLoadingScreenTex;
+        if (const uintptr_t address = LoadingScreenCallAddress()) {
+            onSetLoadingScreenTex.SetRefAddr(address);
+            onSetLoadingScreenTex += [](rage::grcTexturePC* tex, uint8_t) {
+                if (!bEnabled || !bUseCELogo || !tex || !tex->m_Name || !gta.m_pTexture)
+                    return;
+
+                if (!strcmp(tex->m_Name, "pack:/gta.dds"))
+                    gta.SetRenderState();
+            };
+        }
     }
 } consoleSelectMenuIV;

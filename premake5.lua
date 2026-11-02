@@ -10,7 +10,7 @@ project "iv-console-select-menu"
 	targetextension ".asi"
 	characterset ("MBCS")
 	linkoptions "/SAFESEH:NO"
-	buildoptions { "/permissive" }
+	buildoptions { "/permissive-" }
 	defines { "_CRT_SECURE_NO_WARNINGS", "_CRT_NON_CONFORMING_SWPRINTFS", "_USE_MATH_DEFINES" }
 	disablewarnings { "4244", "4800", "4305", "4073", "4838", "4996", "4221", "4430", "26812", "26495", "6031" }
 	cppdialect "c++latest"
@@ -20,8 +20,8 @@ project "iv-console-select-menu"
 	}
 	
 	includedirs { 
-		"source/**",
-		"vendor/**"
+		"source",
+		"vendor"
 	}
 	
 	includedirs {
@@ -38,7 +38,7 @@ project "iv-console-select-menu"
 		targetname "ConsoleSelectMenuIV"
 		debugdir "$(GTA_IV_DIR)"
 		debugcommand "$(GTA_IV_DIR)/GTAIV.exe"
-		postbuildcommands "copy /y \"$(TargetPath)\" \"$(GTA_IV_DIR)\\plugins\\ConsoleSelectMenuIV.asi\""
+		postbuildcommands "if exist \"$(GTA_IV_DIR)\\.\" copy /y \"$(TargetPath)\" \"$(GTA_IV_DIR)\\plugins\\ConsoleSelectMenuIV.asi\""
 		
 	filter { }
 	
